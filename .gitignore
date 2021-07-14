@@ -1,0 +1,6 @@
+Results/result_pics/*.png
+Results/weights/*.pth
+Datasets/CamVid
+Datasets/PASCAL VOC
+.idea
+core.616
