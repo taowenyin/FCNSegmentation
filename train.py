@@ -1,3 +1,4 @@
+import argparse
 import os
 
 import torch
@@ -10,7 +11,7 @@ from Models.Seg import Seg
 from Models.DeepLab import DeepLab
 from dataset import CamVidDataset
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, BatchSampler
 from torch import optim
 from torch.autograd import Variable
 from datetime import datetime
@@ -18,6 +19,9 @@ from segmentation_evalution import *
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel, DataParallel
 from torchinfo import summary
+
+
+# https://www.bilibili.com/video/BV1yt4y1e7sZ?from=search&seid=407626673489639488
 
 
 # 设置学习率策略为Poly
@@ -125,18 +129,59 @@ def evaluate(model, eval_data, criterion, device):
     print('==========================')
 
 
-if __name__ == '__main__':
-    # GPU数量
-    gpu_list = np.arange(torch.cuda.device_count())
+def init_distributed_mode(args):
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        # 多机情况下：RANK表示多机情况下使用的第几台主机，单机情况：RANK表示使用的第几块GPU
+        args.rank = int(os.environ["RANK"])
+        # 多机情况下：WORLD_SIZE表示主机数，单机情况：WORLD_SIZE表示GPU数量
+        args.world_size = int(os.environ['WORLD_SIZE'])
+        # 多机情况下：LOCAL_RANK表示某台主机下的第几块设备，单机情况：与RANK相同
+        args.gpu = int(os.environ['LOCAL_RANK'])
+    elif 'SLURM_PROCID' in os.environ:
+        args.rank = int(os.environ['SLURM_PROCID'])
+        args.gpu = args.rank % torch.cuda.device_count()
+    else:
+        print('Not using distributed mode')
+        args.distributed = False
+        return
 
+    args.distributed = True
+
+    torch.cuda.set_device(args.gpu)
+    args.dist_backend = 'nccl'  # 通信后端，nvidia GPU推荐使用NCCL
+    print('| distributed init (rank {}): {}'.format(args.rank, args.dist_url), flush=True)
+    # 创建进程组
+    dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
+                            world_size=args.world_size, rank=args.rank)
+    # 等待每个GPU运行到此
+    dist.barrier()
+
+
+def main(args):
+    init_distributed_mode(args)
+
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    # 表示第几个GPU
+    rank = args.rank
+
+    # 在GPU_0上打印参数
+    if rank == 0:
+        print(args)
+
+    # 获取分割类型数
+    num_classes = cfg.DATASET[1]
     Cam_train = CamVidDataset([cfg.TRAIN_ROOT, cfg.TRAIN_LABEL], cfg.crop_size)
     Cam_val = CamVidDataset([cfg.VAL_ROOT, cfg.VAL_LABEL], cfg.crop_size)
 
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    num_classes = cfg.DATASET[1]
+    # 为每个rank对应的进程分配训练样本
+    Cam_train_sampler = DistributedSampler(Cam_train)
+    Cam_val_sampler = DistributedSampler(Cam_val)
+    # 将每个rank中的数据组成batch
+    Cam_train_batch_sampler = BatchSampler(Cam_train_sampler, cfg.BATCH_SIZE, drop_last=True)
+    Cam_val_batch_sampler = BatchSampler(Cam_val_sampler, cfg.BATCH_SIZE, drop_last=False)
 
-    train_data = DataLoader(Cam_train, batch_size=cfg.BATCH_SIZE, shuffle=True, num_workers=4)
-    val_data = DataLoader(Cam_val, batch_size=cfg.BATCH_SIZE, shuffle=True, num_workers=4)
+    train_data = DataLoader(Cam_train, batch_sampler=Cam_train_batch_sampler, pin_memory=True, num_workers=4)
+    val_data = DataLoader(Cam_val, batch_sampler=Cam_val_batch_sampler, pin_memory=True, num_workers=4)
 
     net = None
     if cfg.MODEL_TYPE == cfg.Model.FCN:
@@ -146,15 +191,26 @@ if __name__ == '__main__':
     elif cfg.MODEL_TYPE == cfg.Model.DEEP_LAB:
         net = DeepLab(n_classes=num_classes).to(device)
 
-    if net is not None:
-        # 创建并行模型
-        # net = DistributedDataParallel(net, device_ids=gpu_list)
-        criterion = nn.NLLLoss().to(device)
-        optimizer = optim.Adam(net.parameters(), lr=cfg.BASE_LR)
+    print('xxx')
 
-        # dump_file = open('net_dump.txt', 'w')
-        # print(str(summary(net, input_size=(4, 3, 352, 480), device=device)), file=dump_file)
 
-        train(net, train_data, val_data, criterion, optimizer, device)
-    else:
-        print('Model is None')
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    # 开启的进程数(注意不是线程),不用设置该参数，会根据nproc_per_node自动设置
+    parser.add_argument('--world-size', default=4, type=int, help='number of distributed processes')
+    parser.add_argument('--dist-url', default='env://', help='url used to set up distributed training')
+    opt = parser.parse_args()
+    main(opt)
+
+    # if net is not None:
+    #     # 创建并行模型
+    #     net = DistributedDataParallel(net)
+    #     criterion = nn.NLLLoss().to(device)
+    #     optimizer = optim.Adam(net.parameters(), lr=cfg.BASE_LR)
+    #
+    #     # dump_file = open('net_dump.txt', 'w')
+    #     # print(str(summary(net, input_size=(4, 3, 352, 480), device=device)), file=dump_file)
+    #
+    #     # train(net, train_data, val_data, criterion, optimizer, device)
+    # else:
+    #     print('Model is None')
