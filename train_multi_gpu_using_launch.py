@@ -24,7 +24,7 @@ from torch.nn import SyncBatchNorm
 
 
 # https://www.bilibili.com/video/BV1yt4y1e7sZ?from=search&seid=407626673489639488
-# python -m torch.distributed.launch --nproc_per_node=2 --use_env train.py
+# python -m torch.distributed.launch --nproc_per_node=2 --use_env train_multi_gpu_using_launch.py
 
 def is_dist_avail_and_initialized():
     """检查是否支持分布式环境"""
