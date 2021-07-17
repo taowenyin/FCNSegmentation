@@ -61,10 +61,8 @@ if __name__ == '__main__':
     # 保存最好权重
     best = [0]
     for epoch in range(cfg.EPOCH_NUMBER):
-        print('Epoch is [{}/{}]'.format(epoch + 1, cfg.EPOCH_NUMBER))
-
         # 训练
-        train_eval.train_one_epoch(net, train_data, evalution, criterion, optimizer, device)
+        train_eval.train_one_epoch(net, train_data, evalution, criterion, optimizer, device, epoch)
 
         # 更新学习率
         scheduler.step()

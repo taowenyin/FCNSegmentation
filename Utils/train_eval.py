@@ -4,9 +4,10 @@ import Utils.multi_gpu as multi_gpu
 
 from torch.autograd import Variable
 from datetime import datetime
+from tqdm import tqdm
 
 
-def train_one_epoch(model, train_data, evalution, criterion, optimizer, device):
+def train_one_epoch(model, train_data, evalution, criterion, optimizer, device, epoch):
     model.train()
     # 重置评价结果
     evalution.reset()
@@ -14,6 +15,10 @@ def train_one_epoch(model, train_data, evalution, criterion, optimizer, device):
     train_loss = torch.zeros(1).to(device)
     # 清空梯度
     optimizer.zero_grad()
+
+    # 在进程0中打印训练进度
+    if multi_gpu.is_main_process():
+        train_data = tqdm(train_data)
 
     for i, sample in enumerate(train_data):
         optimizer.step()
@@ -32,6 +37,10 @@ def train_one_epoch(model, train_data, evalution, criterion, optimizer, device):
         loss = multi_gpu.reduce_value(loss, average=True)
         # 计算平均训练损失
         train_loss = (train_loss *i + loss.detach()) / (i + 1)
+
+        # 在进程0中打印平均loss
+        if multi_gpu.is_main_process():
+            train_data.desc = "[epoch {}] train loss {}".format(epoch, round(train_loss.item(), 3))
 
         # 去每个像素的最大值索引
         pre_label = out.max(dim=1)[1].data.cpu().numpy()

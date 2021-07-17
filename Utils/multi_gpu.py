@@ -58,5 +58,16 @@ def reduce_value(value, average=True):
 
         return value
 
+
 def cleanup():
     dist.destroy_process_group()
+
+
+def get_rank():
+    if not is_dist_avail_and_initialized():
+        return 0
+    return dist.get_rank()
+
+
+def is_main_process():
+    return get_rank() == 0
