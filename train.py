@@ -96,8 +96,10 @@ if __name__ == '__main__':
     Cam_train = CamVidDataset([cfg.TRAIN_ROOT, cfg.TRAIN_LABEL], cfg.crop_size)
     Cam_val = CamVidDataset([cfg.VAL_ROOT, cfg.VAL_LABEL], cfg.crop_size)
 
-    train_data = DataLoader(Cam_train, batch_size=cfg.BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=4)
-    val_data = DataLoader(Cam_val, batch_size=cfg.BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=4)
+    train_data = DataLoader(Cam_train, batch_size=cfg.BATCH_SIZE, shuffle=True,
+                            pin_memory=True, num_workers=4, drop_last=True)
+    val_data = DataLoader(Cam_val, batch_size=cfg.BATCH_SIZE, shuffle=True,
+                          pin_memory=True, num_workers=4, drop_last=False)
 
     net = None
     if cfg.MODEL_TYPE == cfg.Model.FCN:
