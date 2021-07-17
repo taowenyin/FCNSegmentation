@@ -11,11 +11,14 @@ def train_one_epoch(model, train_data, evalution, criterion, optimizer, device):
     # 重置评价结果
     evalution.reset()
     # 保存训练损失
-    train_loss = 0
+    train_loss = torch.zeros(1).to(device)
     # 清空梯度
     optimizer.zero_grad()
 
     for i, sample in enumerate(train_data):
+        optimizer.step()
+        optimizer.zero_grad()
+
         img_data = Variable(sample['img'].to(device))
         img_label = Variable(sample['label'].to(device))
 
@@ -27,9 +30,8 @@ def train_one_epoch(model, train_data, evalution, criterion, optimizer, device):
         loss.backward()
         # 计算多个GPU损失的均值
         loss = multi_gpu.reduce_value(loss, average=True)
-        optimizer.step()
-        optimizer.zero_grad()
-        train_loss += loss.item()
+        # 计算平均训练损失
+        train_loss = (train_loss *i + loss.detach()) / (i + 1)
 
         # 去每个像素的最大值索引
         pre_label = out.max(dim=1)[1].data.cpu().numpy()
@@ -43,9 +45,9 @@ def train_one_epoch(model, train_data, evalution, criterion, optimizer, device):
     if device != torch.device('cpu'):
         torch.cuda.synchronize(device)
 
-    print('Train Loss: ', train_loss)
+    print('Train Loss: ', train_loss.item())
 
-    return train_loss
+    return train_loss.item()
 
 
 def evaluate_one_epoch(model, eval_data, evalution, criterion, device):
@@ -53,7 +55,7 @@ def evaluate_one_epoch(model, eval_data, evalution, criterion, device):
     # 重置评价结果
     evalution.reset()
     # 保存验证损失
-    eval_loss = 0
+    eval_loss = torch.zeros(1).to(device)
 
     prec_time = datetime.now()
     for i, sample in enumerate(eval_data):
@@ -66,7 +68,8 @@ def evaluate_one_epoch(model, eval_data, evalution, criterion, device):
         loss = criterion(out, img_label)
         # 计算多个GPU损失的均值
         loss = multi_gpu.reduce_value(loss, average=True)
-        eval_loss += loss.item()
+        # 计算平均训练损失
+        eval_loss = (eval_loss * i + loss.detach()) / (i + 1)
 
         # 去每个像素的最大值索引
         pre_label = out.max(dim=1)[1].data.cpu().numpy()
@@ -80,7 +83,7 @@ def evaluate_one_epoch(model, eval_data, evalution, criterion, device):
     if device != torch.device('cpu'):
         torch.cuda.synchronize(device)
 
-    print('Evaluate Loss: ', eval_loss)
+    print('Evaluate Loss: ', eval_loss.item())
 
     cur_time = datetime.now()
     h, remainder = divmod((cur_time - prec_time).seconds, 3600)
