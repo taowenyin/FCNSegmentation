@@ -23,20 +23,20 @@ class FCN(nn.Module):
         # FCN-32s中的卷积核
         self.scores1 = nn.Conv2d(512, num_classes, 1)
         # 初始化卷基层参数为0
-        # self.scores1.weight = nn.Parameter(torch.tensor(np.zeros(self.scores1.weight.shape),
-        #                                                 dtype=torch.float32, requires_grad=True))
+        self.scores1.weight = nn.Parameter(torch.tensor(np.zeros(self.scores1.weight.shape),
+                                                        dtype=torch.float32, requires_grad=True))
         # FCN-16s中的卷积核
         self.scores2 = nn.Conv2d(512, num_classes, 1)
-        # self.scores2.weight = nn.Parameter(torch.tensor(np.zeros(self.scores2.weight.shape),
-        #                                                 dtype=torch.float32, requires_grad=True))
+        self.scores2.weight = nn.Parameter(torch.tensor(np.zeros(self.scores2.weight.shape),
+                                                        dtype=torch.float32, requires_grad=True))
         # FCN-8s中的卷积核
         self.scores3 = nn.Conv2d(256, num_classes, 1)
-        # self.scores3.weight = nn.Parameter(torch.tensor(np.zeros(self.scores3.weight.shape),
-        #                                                 dtype=torch.float32, requires_grad=True))
+        self.scores3.weight = nn.Parameter(torch.tensor(np.zeros(self.scores3.weight.shape),
+                                                        dtype=torch.float32, requires_grad=True))
 
-        # 过渡卷积
-        self.conv_trans1 = nn.Conv2d(512, 256, 1)
-        self.conv_trans2 = nn.Conv2d(256, num_classes, 1)
+        # # 过渡卷积
+        # self.conv_trans1 = nn.Conv2d(512, 256, 1)
+        # self.conv_trans2 = nn.Conv2d(256, num_classes, 1)
 
         # 反卷积，进行8倍还原
         self.upsample_8x = nn.ConvTranspose2d(num_classes, num_classes, 16, 8, 4, bias=False)
