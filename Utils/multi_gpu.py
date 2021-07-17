@@ -57,3 +57,6 @@ def reduce_value(value, average=True):
             value /= world_size
 
         return value
+
+def cleanup():
+    dist.destroy_process_group()

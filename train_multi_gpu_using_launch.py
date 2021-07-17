@@ -153,6 +153,9 @@ def main(args):
                 print(k, v)
             print('==========================')
 
+    # 训练完成后释放进程组
+    multi_gpu.cleanup()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
