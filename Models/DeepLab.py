@@ -320,7 +320,7 @@ class DeepLab(nn.Module):
         # ASPP输出要经过1x1的卷积
         # self.conv1 = nn.Conv2d(256, 256, kernel_size=1, bias=False)
         # self.bn1 = nn.BatchNorm2d(256)
-        # self.relu = nn.ReLU()
+        self.relu = nn.ReLU()
 
         # Low Level要经过1x1的卷积
         self.conv2 = nn.Conv2d(128, 48, kernel_size=1, bias=False)
