@@ -1,9 +1,8 @@
 import argparse
-import os
-
 import torch
-import torch.nn.functional as F
 import torch.distributed as dist
+import Utils.multi_gpu as multi_gpu
+import Utils.train_eval as train_eval
 
 from Models.FCN import FCN
 from Models.Seg import Seg
@@ -26,142 +25,9 @@ from torch.nn import SyncBatchNorm
 # https://www.bilibili.com/video/BV1yt4y1e7sZ?from=search&seid=407626673489639488
 # python -m torch.distributed.launch --nproc_per_node=2 --use_env train_multi_gpu_using_launch.py
 
-def is_dist_avail_and_initialized():
-    """检查是否支持分布式环境"""
-    if not dist.is_available():
-        return False
-    if not dist.is_initialized():
-        return False
-    return True
-
-
-def get_world_size():
-    if not is_dist_avail_and_initialized():
-        return 1
-    return dist.get_world_size()
-
-
-def reduce_value(value, average=True):
-    world_size = get_world_size()
-    if world_size < 2:  # 单GPU的情况
-        return value
-
-    with torch.no_grad():
-        dist.all_reduce(value)
-        if average:
-            value /= world_size
-
-        return value
-
-
-def train_one_epoch(model, train_data, evalution, criterion, optimizer, device):
-    model.train()
-    # 重置评价结果
-    evalution.reset()
-    # 保存训练损失
-    train_loss = 0
-    # 清空梯度
-    optimizer.zero_grad()
-
-    for i, sample in enumerate(train_data):
-        img_data = Variable(sample['img'].to(device))
-        img_label = Variable(sample['label'].to(device))
-
-        # 训练
-        # out = model(img_data)['out']
-        out = model(img_data)
-        out = F.log_softmax(out, dim=1)
-        loss = criterion(out, img_label)
-        optimizer.zero_grad()
-        loss.backward()
-        # 计算多个GPU损失的均值
-        loss = reduce_value(loss, average=True)
-        optimizer.step()
-        optimizer.zero_grad()
-        train_loss += loss.item()
-
-        # 去每个像素的最大值索引
-        pre_label = out.max(dim=1)[1].data.cpu().numpy()
-        # 获取真实的标签
-        true_label = img_label.data.cpu().numpy()
-
-        # 指标计算
-        evalution.update(true_label, pre_label)
-
-    # 等待所有进程计算完毕
-    if device != torch.device('cpu'):
-        torch.cuda.synchronize(device)
-
-    print('Train Loss: ', train_loss)
-
-    return train_loss
-
-
-def evaluate_one_epoch(model, eval_data, evalution, criterion, device):
-    model.eval()
-    # 重置评价结果
-    evalution.reset()
-    # 保存验证损失
-    eval_loss = 0
-
-    prec_time = datetime.now()
-    for i, sample in enumerate(eval_data):
-        img_data = Variable(sample['img'].to(device))
-        img_label = Variable(sample['label'].to(device))
-
-        # 训练
-        out = model(img_data)
-        out = F.log_softmax(out, dim=1)
-        loss = criterion(out, img_label)
-        eval_loss += loss.item()
-
-        # 去每个像素的最大值索引
-        pre_label = out.max(dim=1)[1].data.cpu().numpy()
-        # 获取真实的标签
-        true_label = img_label.data.cpu().numpy()
-
-        # 指标计算
-        evalution.update(true_label, pre_label)
-
-    print('Evaluate Loss: ', eval_loss)
-
-    cur_time = datetime.now()
-    h, remainder = divmod((cur_time - prec_time).seconds, 3600)
-    m, s = divmod(remainder, 60)
-    time_str = 'Time: {:.0f}:{:.0f}:{:.0f}'.format(h, m, s)
-    print(time_str)
-
-
-def init_distributed_mode(args):
-    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        # 多机情况下：RANK表示多机情况下使用的第几台主机，单机情况：RANK表示使用的第几块GPU
-        args.rank = int(os.environ["RANK"])
-        # 多机情况下：WORLD_SIZE表示主机数，单机情况：WORLD_SIZE表示GPU数量
-        args.world_size = int(os.environ['WORLD_SIZE'])
-        # 多机情况下：LOCAL_RANK表示某台主机下的第几块设备，单机情况：与RANK相同
-        args.gpu = int(os.environ['LOCAL_RANK'])
-    elif 'SLURM_PROCID' in os.environ:
-        args.rank = int(os.environ['SLURM_PROCID'])
-        args.gpu = args.rank % torch.cuda.device_count()
-    else:
-        print('Not using distributed mode')
-        args.distributed = False
-        return
-
-    args.distributed = True
-    # 为每个进程设置不同的GPU
-    torch.cuda.set_device(args.gpu)
-    args.dist_backend = 'nccl'  # 通信后端，nvidia GPU推荐使用NCCL
-    print('| distributed init (rank {}): {}'.format(args.rank, args.dist_url), flush=True)
-    # 创建进程组
-    dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
-                            world_size=args.world_size, rank=args.rank)
-    # 等待每个GPU运行到此
-    dist.barrier()
-
 
 def main(args):
-    init_distributed_mode(args)
+    multi_gpu.init_distributed_mode(args)
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     # 表示第几个GPU
@@ -179,8 +45,8 @@ def main(args):
     Cam_train_batch_sampler = BatchSampler(Cam_train_sampler, cfg.BATCH_SIZE, drop_last=True)
     Cam_val_batch_sampler = BatchSampler(Cam_val_sampler, cfg.BATCH_SIZE, drop_last=False)
 
-    train_data = DataLoader(Cam_train, batch_sampler=Cam_train_batch_sampler, pin_memory=True)
-    val_data = DataLoader(Cam_val, batch_sampler=Cam_val_batch_sampler, pin_memory=True)
+    train_data = DataLoader(Cam_train, batch_sampler=Cam_train_batch_sampler, pin_memory=True, num_workers=4)
+    val_data = DataLoader(Cam_val, batch_sampler=Cam_val_batch_sampler, pin_memory=True, num_workers=4)
 
     net = None
     if cfg.MODEL_TYPE == cfg.Model.FCN:
@@ -225,7 +91,6 @@ def main(args):
         net = SyncBatchNorm.convert_sync_batchnorm(net).to(device)
 
     # 创建DDP模型
-    # net = DistributedDataParallel(net, device_ids=[args.gpu], find_unused_parameters=True)
     net = DistributedDataParallel(net, device_ids=[args.gpu])
 
     criterion = nn.NLLLoss().to(device)
@@ -254,7 +119,7 @@ def main(args):
         Cam_train_sampler.set_epoch(epoch)
 
         # 训练
-        train_one_epoch(net, train_data, evalution, criterion, optimizer, device)
+        train_eval.train_one_epoch(net, train_data, evalution, criterion, optimizer, device)
 
         # 更新学习率
         scheduler.step()
@@ -277,12 +142,16 @@ def main(args):
                     torch.save(net.state_dict(), './Results/weights/DeepLab_best.pth')
             print('~~~~~~~~~~~~~~~~~~~~~~~~~')
 
-        # # 验证
-        # evaluate_one_epoch(net, val_data, evalution, criterion, device)
-        # metrics = evalution.get_scores()
-        # for k, v in metrics[0].items():
-        #     print(k, v)
-        # print('==========================')
+        # 验证
+        train_eval.evaluate_one_epoch(net, val_data, evalution, criterion, device)
+
+        # 在GPU0上进行指标计算
+        if rank == 0:
+            # 计算训练指标
+            metrics = evalution.get_scores()
+            for k, v in metrics[0].items():
+                print(k, v)
+            print('==========================')
 
 
 if __name__ == '__main__':
