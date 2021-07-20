@@ -42,18 +42,27 @@ class NetVLAD(nn.Module):
 
     def forward(self, x):
         if self.normalize_input:
+            # 跨层做归一化
             x = F.normalize(x, p=2, dim=1)
 
 
 if __name__ == '__main__':
     images = torch.randn(4, 3, 352, 480)
 
-    N, C = images.shape[:2]
+    # N, C = images.shape[:2]
+    #
+    # centroids = torch.rand(64, 128)
+    # data = 2.0 * 100 * centroids
+    # data = data.unsqueeze(-1).unsqueeze(-1)
+    #
+    # norm = centroids.norm(dim=1)
 
-    centroids = torch.rand(64, 128)
-    data = 2.0 * 100 * centroids
-    data = data.unsqueeze(-1).unsqueeze(-1)
-
-    norm = centroids.norm(dim=1)
+    # aaa = torch.FloatTensor([[3, 4], [5, 12], [6, 8]])
+    # print(F.normalize(images, 2, 0))
+    # print(F.normalize(images, 2, 1))
+    # print(F.normalize(images, 2, -1))
+    print(torch.norm(images, p=2, dim=0).shape)
+    print(torch.norm(images, p=2, dim=1).shape)
+    print(torch.norm(images, p=2, dim=-1).shape)
 
     print('xxx')
